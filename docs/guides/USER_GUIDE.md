@@ -1313,3 +1313,20 @@ Output → `electron/dist-electron/`
 | `OMNIROUTE_MEMORY_MB` | `512`   | Node.js heap limit (64–16384 MB) |
 
 📖 Full documentation: [`electron/README.md`](../../electron/README.md)
+
+## Custom OpenAI-Compatible Providers
+
+OmniRoute can connect to third-party OpenAI-compatible gateways from **Providers → Add OpenAI Compatible**.
+
+- **Base URL:** enter the provider's API base URL, normally ending at `/v1` rather than the full `/chat/completions` endpoint.
+- **API key:** enter the credential supplied by the upstream provider.
+- **Prefix:** this becomes the routing namespace. Requests use the form `<prefix>/<model>`.
+- The prefix must not collide with a built-in provider ID, built-in alias, or retired provider ID. OmniRoute rejects reserved prefixes so that custom routes cannot accidentally shadow built-in providers.
+
+For example, a provider with prefix `my-gateway` and model `example-model` is addressed as:
+
+```
+my-gateway/example-model
+```
+
+If OmniRoute reports that a prefix is reserved, choose a different prefix instead of trying to reuse a built-in provider name.
