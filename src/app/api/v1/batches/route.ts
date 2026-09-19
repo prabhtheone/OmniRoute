@@ -10,6 +10,7 @@ import {
 } from "@/app/api/v1/_helpers/apiKeyScope";
 import { formatBatchResponse } from "./formatBatchResponse";
 import { parseBatchListLimit } from "./parseListLimit";
+import { sanitizeErrorMessage } from "@/open-sse/utils/error";
 
 export async function OPTIONS() {
   return handleCorsOptions();
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: {
-          message: error instanceof Error ? error.message : "Create failed",
+          message: sanitizeErrorMessage(error instanceof Error ? error.message : "Create failed"),
           type: "invalid_request_error",
         },
       },
