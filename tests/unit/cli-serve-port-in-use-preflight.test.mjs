@@ -73,14 +73,45 @@ test("findListeningPids reports the PID holding the port (posix lsof)", async ()
   assert.deepEqual(pids, [4242, 4243]);
 });
 
-test("findListeningPids returns empty when nothing is listening", async () => {
+test("findListeningPids treats lsof exit 1 with empty output as no listener", async () => {
+  const noMatch = Object.assign(new Error("Command failed: lsof"), {
+    code: 1,
+    stdout: "",
+  });
   const pids = await findListeningPids(20128, {
-    platform: "win32",
+    platform: "darwin",
     execFileAsync: async () => {
-      throw new Error("netstat unavailable");
+      throw noMatch;
     },
   });
-  assert.deepEqual(pids, [], "a discovery failure must not be reported as a busy port");
+  assert.deepEqual(pids, []);
+});
+
+test("findListeningPids returns null when discovery is unavailable", async () => {
+  const enoent = Object.assign(new Error("spawn lsof ENOENT"), { code: "ENOENT" });
+  const pids = await findListeningPids(20128, {
+    platform: "linux",
+    execFileAsync: async () => {
+      throw enoent;
+    },
+  });
+  assert.equal(pids, null, "a missing discovery tool is unknown, not free");
+});
+
+test("probePortFree detects a loopback-bound listener on macOS", async () => {
+  const { probePortFree } = await import("../../bin/cli/utils/pid.mjs");
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address();
+  try {
+    assert.equal(await probePortFree(port), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+  assert.equal(await probePortFree(port), true);
 });
 
 test(
@@ -106,6 +137,22 @@ test(
     }
   }
 );
+
+test("reportPortInUse degrades gracefully when the owner pid is unknown", async () => {
+  const { reportPortInUse } = await import("../../bin/cli/commands/serve.mjs");
+  const lines = [];
+  const origErr = console.error.bind(console);
+  console.error = (...args) => lines.push(args.join(" "));
+  try {
+    reportPortInUse(20128, []);
+  } finally {
+    console.error = origErr;
+  }
+  const out = lines.join("\n");
+  assert.match(out, /Port 20128 is already in use/);
+  assert.match(out, /unknown|unidentified/);
+  assert.match(out, /omniroute stop/);
+});
 
 test("reportPortInUse names the port, the owning pid, and how to resolve it", async () => {
   const { reportPortInUse } = await import("../../bin/cli/commands/serve.mjs");
