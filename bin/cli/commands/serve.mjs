@@ -9,6 +9,7 @@ import {
   cleanupPidFile,
   waitForServer,
   findListeningPids,
+  probePortFree,
   resolveReadyTimeoutMs,
 } from "../utils/pid.mjs";
 import {
@@ -245,7 +246,17 @@ export async function runServe(opts = {}) {
   // BEFORE any pid file is written or any child is spawned. Otherwise the
   // doomed child's EADDRINUSE arrives only after this process has rewritten
   // the pid files of the healthy instance that actually owns the port.
-  const busyPids = await findListeningPids(dashboardPort);
+  //
+  // A null discovery result means lsof/netstat is missing or unusable, so use
+  // an in-process bind probe as the fallback. Never leave busyPids null:
+  // otherwise a free port on macOS/Linux reaches .length and crashes the CLI.
+  let busyPids = await findListeningPids(dashboardPort);
+  if (busyPids === null) {
+    busyPids = (await probePortFree(dashboardPort)) ? [] : [null];
+  } else if (busyPids.length === 0) {
+    // Discovery can race a process that starts between the lookup and spawn.
+    if (!(await probePortFree(dashboardPort))) busyPids = [null];
+  }
   if (busyPids.length > 0) {
     reportPortInUse(dashboardPort, busyPids);
     process.exit(1);
@@ -334,7 +345,13 @@ export async function runServe(opts = {}) {
  * and the two ways out. Exported for unit tests.
  */
 export function reportPortInUse(port, pids = []) {
-  const owner = pids.length === 1 ? `PID ${pids[0]}` : `PIDs ${pids.join(", ")}`;
+  const known = pids.filter((pid) => Number.isFinite(pid) && pid > 0);
+  const owner =
+    known.length === 0
+      ? "an unknown process"
+      : known.length === 1
+        ? `PID ${known[0]}`
+        : `PIDs ${known.join(", ")}`;
   console.error(`\n\x1b[31m✖ Port ${port} is already in use by ${owner}.\x1b[0m`);
   console.error(
     `  Another OmniRoute is most likely already serving there, so open` +
