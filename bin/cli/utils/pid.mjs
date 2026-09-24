@@ -89,11 +89,35 @@ export async function findListeningPids(port, deps = {}) {
       .split("\n")
       .map((entry) => parseInt(entry, 10))
       .filter((entry) => Number.isFinite(entry) && entry > 0);
-  } catch {
-    // No netstat/lsof available, or simply no listener. Report "free": a false
-    // "busy" would block a legitimate start, the worse failure of the two.
-    return [];
+  } catch (err) {
+    // lsof exits 1 with empty output when nothing matches: that is a
+    // successful look that found no listener, not a discovery failure.
+    if (platform !== "win32" && err?.code === 1 && !String(err?.stdout ?? "").trim()) {
+      return [];
+    }
+    // Tool missing (ENOENT) or unusable: "no listener" cannot be distinguished
+    // from "cannot look" here, so report null and let the caller decide. The
+    // serve preflight bind-probes the port in that case (#14518).
+    return null;
   }
+}
+
+// Bind-probe a port without any external binary. Try both wildcard and loopback
+// binds because macOS can allow a wildcard bind while 127.0.0.1 is already held.
+export async function probePortFree(port, deps = {}) {
+  const net = deps.net || (await import("node:net"));
+  const bindable = (host) =>
+    new Promise((resolve) => {
+      const probe = net.createServer();
+      probe.once("error", (err) => {
+        probe.close();
+        resolve(err.code !== "EADDRINUSE");
+      });
+      probe.listen({ port, host }, () => {
+        probe.close(() => resolve(true));
+      });
+    });
+  return (await bindable(undefined)) && (await bindable("127.0.0.1"));
 }
 
 function parseNetstatListeningPids(stdout, port) {
